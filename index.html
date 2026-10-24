@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JDP MOBILIDADE - PAINEL DO MOTORISTA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase SDK Compat -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    
+    <!-- Leaflet Engine -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;700;900&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --cyan: #06b6d4;
+            --gold: #fde047;
+            --slate: #020617;
+            --card: #0f172a;
+            --green: #22c55e;
+            --jdp-gold-gradient: linear-gradient(to right, #bf953f, #fcf6ba, #b38728, #fbf5b7, #aa771c);
+        }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; font-family: 'Inter', sans-serif; background-color: var(--slate);
+        }
+        .terminal-text { font-family: 'Orbitron', sans-serif; }
+        .text-gold { color: var(--gold) !important; }
+
+        #map { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; background: var(--slate); }
+        .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(80%); }
+
+        /* MODAL DE CADASTRO DO MOTORISTA */
+        #modal-cadastro-driver {
+            position: fixed; inset: 0; background: rgba(2, 6, 23, 0.96); z-index: 9999;
+            display: flex; align-items: center; justify-content: center; padding: 20px;
+        }
+
+        .card-cadastro {
+            width: 100%; max-width: 400px; background: var(--card); border: 2px solid var(--cyan);
+            border-radius: 20px; padding: 25px; color: #fff; box-shadow: 0 0 25px rgba(6,182,212,0.3);
+        }
+
+        .input-group { margin-bottom: 12px; }
+        .input-group label { display: block; font-size: 10px; font-family: 'Orbitron'; color: #94a3b8; margin-bottom: 4px; }
+        .input-campo {
+            width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155;
+            background: #000; color: #fff; font-size: 13px; outline: none;
+        }
+        .input-campo:focus { border-color: var(--cyan); }
+
+        /* NOTIFICAÇÃO POPUP DE CORRIDA DISPONÍVEL (5 SEGUNDOS) */
+        #card-corrida-popup {
+            position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 380px; background: #0f172a; border: 2px solid var(--gold);
+            border-radius: 18px; padding: 18px; z-index: 2000; display: none;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+        }
+
+        .barra-progresso-container {
+            width: 100%; height: 6px; background: #334155; border-radius: 3px;
+            overflow: hidden; margin-bottom: 12px;
+        }
+
+        .barra-progresso {
+            height: 100%; background: #ef4444; width: 100%;
+            transition: width 0.1s linear;
+        }
+    </style>
+</head>
+<body class="relative text-gold">
+
+    <!-- MAPA EM TELA CHEIA -->
+    <div id="map"></div>
+
+    <!-- BOTÃO DE CORRIDAS EM FILA -->
+    <div class="absolute top-4 left-4 z-20">
+        <button onclick="alternarPainelCorridas()" class="bg-[#020617]/90 border-2 border-cyan-500 text-cyan-400 px-4 py-3 rounded-xl shadow-[0_0_15px_rgba(6,182,212,0.4)] flex items-center gap-2 terminal-text text-xs font-black uppercase backdrop-blur-md">
+            <i class="fas fa-list-ul text-sm"></i> DISPONÍVEIS
+            <span id="badgeQtd" class="bg-cyan-500 text-black px-2 py-0.5 rounded-full text-[10px] font-black ml-1">0</span>
+        </button>
+    </div>
+
+    <!-- CARTÃO POPUP DE SOLICITAÇÃO (NOTIFICAÇÃO DURA 5 SEGUNDOS) -->
+    <div id="card-corrida-popup">
+        <div class="barra-progresso-container">
+            <div class="barra-progresso" id="barra-timer"></div>
+        </div>
+        <div class="flex justify-between items-center mb-2">
+            <span class="text-[10px] terminal-text text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded" id="popup-id">ID: #00000</span>
+            <span class="text-[11px] font-black text-green-400" id="popup-valor">R$ 0,00</span>
+        </div>
+        <p class="text-xs text-zinc-400 font-bold uppercase mb-1">DESTINO DO PASSAGEIRO:</p>
+        <p class="text-white font-black text-base uppercase truncate mb-4" id="popup-destino">---</p>
+
+        <div class="flex gap-2">
+            <button onclick="aceitarCorridaPopup()" class="flex-1 bg-green-500 hover:bg-green-600 text-black font-black py-3 rounded-xl terminal-text text-xs uppercase shadow-lg">
+                ACEITAR CORRIDA
+            </button>
+            <button onclick="fecharPopupCorrida()" class="bg-red-600 hover:bg-red-700 text-white font-black px-4 py-3 rounded-xl text-xs">
+                RECUSAR
+            </button>
+        </div>
+    </div>
+
+    <!-- PAINEL LATERAL (GAVETA DE CORRIDAS) -->
+    <div id="painelLateral" class="absolute top-0 left-0 h-full w-full md:w-[380px] bg-[#020617]/95 backdrop-blur-xl border-r-2 border-cyan-500 flex flex-col z-30 transform -translate-x-full shadow-2xl transition-all duration-300">
+        <div class="p-4 border-b border-zinc-800 bg-[#070d19] flex justify-between items-center">
+            <h2 class="terminal-text text-cyan-400 font-black text-xs tracking-widest flex items-center gap-2">
+                <i class="fas fa-satellite-dish animate-pulse"></i> CORRIDAS EM UARINI
+            </h2>
+            <button onclick="alternarPainelCorridas()" class="text-zinc-400 hover:text-white text-lg p-1"><i class="fas fa-times"></i></button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-3 space-y-3" id="listaFilaGeral">
+            <p class="text-center text-zinc-600 text-xs py-10">Buscando ofertas próximas...</p>
+        </div>
+    </div>
+
+    <!-- PAINEL DE CONTROLE INFERIOR DO MOTORISTA -->
+    <div class="absolute bottom-0 w-full bg-[#020617]/95 backdrop-blur-lg p-6 rounded-t-3xl border-t-2 border-cyan-500 z-10 box-border">
+        <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-3">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] terminal-text text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded">CORRIDA ATIVA:</span>
+                    <span id="displayPedidoID" class="text-[11px] terminal-text text-white font-black">NENHUMA</span>
+                </div>
+                <p id="entCliente" class="text-gold font-black text-lg uppercase mt-1">AGUARDANDO CHAMADA...</p>
+                <p id="entEndereco" class="text-zinc-400 text-xs uppercase truncate max-w-xs">---</p>
+            </div>
+            <div id="statusGPS" class="text-[10px] terminal-text font-black text-red-500 uppercase border border-red-500/30 px-3 py-1 rounded bg-red-950/20">🔴 OFFLINE</div>
+        </div>
+
+        <div class="flex gap-2">
+            <button id="btnRota" onclick="alternarRastreamento()" class="flex-1 bg-gold hover:bg-yellow-500 text-black font-black py-4 rounded-xl shadow-[0_0_15px_rgba(253,224,113,0.3)] uppercase terminal-text text-sm">INICIAR GPS</button>
+            <button onclick="finalizarCorridaCompleta()" class="bg-red-600 hover:bg-red-700 text-white font-black px-5 rounded-xl text-xs uppercase">FINALIZAR</button>
+        </div>
+    </div>
+
+    <!-- MODAL DE CADASTRO SIMPLES DO MOTORISTA -->
+    <div id="modal-cadastro-driver">
+        <div class="card-cadastro">
+            <div style="text-align: center; margin-bottom: 15px;">
+                <h2 style="font-family:'Orbitron'; color:var(--cyan); font-size:15px;">CADASTRO DE MOTORISTA 🚗🛵</h2>
+                <p style="font-size:11px; color:#94a3b8; margin-top:4px;">Insira seus dados para aceitar corridas</p>
+            </div>
+
+            <div class="input-group"><label>NOME</label><input type="text" id="drv-nome" class="input-campo" placeholder="Ex: João"></div>
+            <div class="input-group"><label>SOBRENOME</label><input type="text" id="drv-sobrenome" class="input-campo" placeholder="Ex: Silva"></div>
+            <div class="input-group"><label>MODELO DO VEÍCULO / MOTO</label><input type="text" id="drv-moto" class="input-campo" placeholder="Ex: Honda Fan 160"></div>
+            <div class="input-group"><label>COR DO VEÍCULO</label><input type="text" id="drv-cor" class="input-campo" placeholder="Ex: Vermelha"></div>
+            <div class="input-group"><label>PLACA DA MOTO/CARRO</label><input type="text" id="drv-placa" class="input-campo" placeholder="Ex: PHX-1234"></div>
+            <div class="input-group"><label>DOCUMENTO (CNH/CPF)</label><input type="text" id="drv-doc" class="input-campo" placeholder="Ex: 000.000.000-00"></div>
+
+            <button onclick="salvarCadastroDriver()" style="width:100%; padding:14px; background:var(--jdp-gold-gradient); border:none; border-radius:10px; font-family:'Orbitron'; font-weight:900; color:#000; cursor:pointer; margin-top:10px;">
+                CADASTRAR E FICAR ONLINE
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = { databaseURL: "https://dony-burguers-default-rtdb.firebaseio.com" };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const LOJA_ID = 'uber_2026';
+
+        let map = null, markerCliente = null, markerMotoboy = null, watchId = null, emRota = false;
+        let idPedidoAtual = "NENHUM";
+        let producaoPendentes = {}, corridaPopupAtiva = null;
+        let timerPopupInterval = null;
+
+        const iconeMotoboy = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const drvCadastrado = localStorage.getItem('jdp_driver_doc');
+            if (drvCadastrado) {
+                document.getElementById('modal-cadastro-driver').style.display = 'none';
+            }
+            iniciarMapaEngine();
+        });
+
+        function salvarCadastroDriver() {
+            const nome = document.getElementById('drv-nome').value.trim();
+            const sobrenome = document.getElementById('drv-sobrenome').value.trim();
+            const moto = document.getElementById('drv-moto').value.trim();
+            const cor = document.getElementById('drv-cor').value.trim();
+            const placa = document.getElementById('drv-placa').value.trim();
+            const doc = document.getElementById('drv-doc').value.trim();
+
+            if (!nome || !sobrenome || !moto || !cor || !placa || !doc) return alert("Preencha todos os dados.");
+
+            const driverData = { nome, sobrenome, veiculo: moto, cor, placa, documento: doc, cadastrado_em: new Date().toISOString() };
+
+            db.ref(`lojas/${LOJA_ID}/motoristas/${doc}`).set(driverData).then(() => {
+                localStorage.setItem('jdp_driver_doc', doc);
+                localStorage.setItem('jdp_driver_nome', `${nome} ${sobrenome}`);
+                localStorage.setItem('jdp_driver_veiculo', moto);
+                localStorage.setItem('jdp_driver_cor', cor);
+                localStorage.setItem('jdp_driver_placa', placa);
+                document.getElementById('modal-cadastro-driver').style.display = 'none';
+            });
+        }
+
+        function iniciarMapaEngine() {
+            map = L.map('map', { zoomControl: true, attributionControl: false }).setView([-2.9903, -60.0673], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        }
+
+        function alternarPainelCorridas() {
+            document.getElementById('painelLateral').classList.toggle('-translate-x-full');
+        }
+
+        db.ref(`lojas/${LOJA_ID}/producao_pendente`).on('value', snap => {
+            producaoPendentes = snap.val() || {};
+            processarFilaEVisualizacaoGeral();
+        });
+
+        function processarFilaEVisualizacaoGeral() {
+            const container = document.getElementById('listaFilaGeral');
+            const badgeQtd = document.getElementById('badgeQtd');
+            const ids = Object.keys(producaoPendentes);
+
+            badgeQtd.innerText = ids.length;
+
+            if (ids.length === 0) {
+                container.innerHTML = `<div class="text-center py-10 text-zinc-600 text-xs uppercase">Nenhuma corrida no radar</div>`;
+                return;
+            }
+
+            let html = "";
+            ids.forEach(id => {
+                const item = producaoPendentes[id];
+                if (item && item.status === "Pendente") {
+                    if (!corridaPopupAtiva) abrirPopupCorrida(item);
+
+                    html += `
+                        <div class="p-3 bg-[#0f172a] border border-zinc-800 rounded-lg hover:border-cyan-500 transition-all flex justify-between items-center">
+                            <div class="flex-1 cursor-pointer" onclick="aceitarCorridaDireta('${item.id}')">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="text-[10px] terminal-text text-zinc-500">${item.id}</span>
+                                    <span class="text-[10px] font-black text-green-400">R$ ${item.valor_ofertado || '10.00'}</span>
+                                </div>
+                                <div class="text-xs font-black text-white uppercase truncate">${item.destino}</div>
+                                <div class="text-[10px] text-zinc-400 mt-1">Passageiro: ${item.passageiro_tel}</div>
+                            </div>
+                        </div>`;
+                }
+            });
+            container.innerHTML = html;
+        }
+
+        function abrirPopupCorrida(item) {
+            corridaPopupAtiva = item;
+            document.getElementById('popup-id').innerText = `ID: #${item.id}`;
+            document.getElementById('popup-valor').innerText = `R$ ${item.valor_ofertado || '10.00'}`;
+            document.getElementById('popup-destino').innerText = item.destino;
+
+            const card = document.getElementById('card-corrida-popup');
+            const barra = document.getElementById('barra-timer');
+            card.style.display = 'block';
+
+            let porcentagem = 100;
+            clearInterval(timerPopupInterval);
+
+            timerPopupInterval = setInterval(() => {
+                porcentagem -= 2;
+                barra.style.width = `${porcentagem}%`;
+
+                if (porcentagem <= 0) {
+                    fecharPopupCorrida();
+                }
+            }, 100);
+        }
+
+        function fecharPopupCorrida() {
+            clearInterval(timerPopupInterval);
+            document.getElementById('card-corrida-popup').style.display = 'none';
+            corridaPopupAtiva = null;
+        }
+
+        function aceitarCorridaPopup() {
+            if (corridaPopupAtiva) {
+                aceitarCorridaDireta(corridaPopupAtiva.id);
+                fecharPopupCorrida();
+            }
+        }
+
+        function aceitarCorridaDireta(id) {
+            const item = producaoPendentes[id];
+            if (!item) return;
+
+            idPedidoAtual = id;
+            document.getElementById('displayPedidoID').innerText = id;
+            document.getElementById('entCliente').innerText = `PASSAGEIRO: ${item.passageiro_tel}`;
+            document.getElementById('entEndereco').innerText = item.destino.toUpperCase();
+
+            const driverNome = localStorage.getItem('jdp_driver_nome') || "Motorista Uarini";
+            const driverVeiculo = localStorage.getItem('jdp_driver_veiculo') || "Honda Fan 160";
+            const driverCor = localStorage.getItem('jdp_driver_cor') || "Vermelha";
+            const driverPlaca = localStorage.getItem('jdp_driver_placa') || "PHX-1234";
+
+            // Envia os dados completos ao Firebase para exibição instantânea no cliente
+            db.ref(`lojas/${LOJA_ID}/rastreio_ativo/${id}`).set({
+                id: id,
+                status: "em_rota",
+                na_pista: true,
+                motorista_nome: driverNome,
+                motorista_veiculo: driverVeiculo,
+                motorista_cor: driverCor,
+                motorista_placa: driverPlaca,
+                tempo_estimado: "3",
+                destino: item.destino,
+                valor: item.valor_ofertado,
+                timestamp: Date.now()
+            });
+
+            db.ref(`lojas/${LOJA_ID}/producao_pendente/${id}`).remove();
+            alert("CORRIDA ACEITA! O passageiro já foi notificado.");
+            alternarRastreamento();
+        }
+
+        function alternarRastreamento() {
+            if (!emRota) {
+                if (!navigator.geolocation) return alert("Ative o GPS do celular!");
+
+                emRota = true;
+                document.getElementById('btnRota').innerText = "TRANSMITINDO GPS...";
+                document.getElementById('statusGPS').innerText = "🟢 TRANSMITINDO";
+                document.getElementById('statusGPS').className = "text-[10px] terminal-text font-black text-green-400 uppercase border border-green-500/30 px-3 py-1 rounded bg-green-950/20";
+
+                watchId = navigator.geolocation.watchPosition(pos => {
+                    const { latitude, longitude, heading } = pos.coords;
+
+                    db.ref(`lojas/${LOJA_ID}/motoboy_status`).set({
+                        latitude, longitude, bearing: heading || 0, online: true, timestamp: Date.now()
+                    });
+
+                    if (markerMotoboy) map.removeLayer(markerMotoboy);
+                    markerMotoboy = L.marker([latitude, longitude], { icon: iconeMotoboy }).addTo(map);
+                    map.panTo([latitude, longitude]);
+                }, null, { enableHighAccuracy: true });
+            }
+        }
+
+        function finalizarCorridaCompleta() {
+            if (idPedidoAtual === "NENHUM") return alert("Nenhuma corrida ativa!");
+
+            db.ref(`lojas/${LOJA_ID}/rastreio_ativo/${idPedidoAtual}`).remove();
+            db.ref(`lojas/${LOJA_ID}/motoboy_status`).set({ online: false });
+
+            if (watchId) navigator.geolocation.clearWatch(watchId);
+            emRota = false;
+            idPedidoAtual = "NENHUM";
+
+            document.getElementById('displayPedidoID').innerText = "NENHUMA";
+            document.getElementById('entCliente').innerText = "AGUARDANDO CHAMADA...";
+            document.getElementById('entEndereco').innerText = "---";
+            alert("CORRIDA FINALIZADA!");
+        }
+    </script>
+</body>
+</html>
